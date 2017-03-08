@@ -5,9 +5,10 @@ from base64 import b64encode, b64decode
 from mimetypes import guess_type
 from pbincli.transports import privatebin
 from pbincli.utils import PBinCLIException, check_readable, check_writable, json_load_byteified
+from zlib import compress, decompress
 
 
-""" Initialise settings """
+# Initialise settings
 pbincli.settings.init()
 
 
@@ -25,14 +26,19 @@ def send(args):
         print("Nothing to send!")
         sys.exit(1)
 
-    """Formatting request"""
+    # Compressing and b64 encoding text
+    text_c = b64encode(compress(text.encode("UTF-8")))
+
+    print text_c + "\n"
+
+    # Formatting request
     request = {'expire':args.expire,'formatter':args.format,'burnafterreading':int(args.burn),'opendiscussion':int(args.discus)}
 
     salt = os.urandom(8)
     passphrase = b64encode(os.urandom(32))
     if args.debug: print("Passphrase:\t{}".format(passphrase))
 
-    """If we set PASSWORD variable"""
+    # If we set PASSWORD variable
     if args.password:
         digest = hashlib.sha256(args.password.encode("UTF-8")).hexdigest()
         password = passphrase + digest.encode("UTF-8")
@@ -41,11 +47,11 @@ def send(args):
 
     if args.debug: print("Password:\t{}".format(password))
 
-    """Encrypting text (comment)"""
-    cipher = pbincli.sjcl_simple.encrypt(password, text, salt)
+    # Encrypting text (comment)
+    cipher = pbincli.sjcl_simple.encrypt(password, text_c, salt)
     request['data'] = json.dumps(cipher, ensure_ascii=False).replace(' ','')
 
-    """If we set FILE variable"""
+    # If we set FILE variable
     if args.file:
         check_readable(args.file)
         with open(args.file, "rb") as f:
@@ -57,13 +63,18 @@ def send(args):
         file = "data:" + mime[0] + ";base64," + b64encode(contents)
         filename = path_leaf(args.file)
 
-        cipherfile = pbincli.sjcl_simple.encrypt(password, file, salt)
-        cipherfilename = pbincli.sjcl_simple.encrypt(password, filename, salt)
+        file_c = b64encode(compress(file))
+        filename_c = b64encode(compress(filename))
+
+        cipherfile = pbincli.sjcl_simple.encrypt(password, file_c, salt)
+        cipherfilename = pbincli.sjcl_simple.encrypt(password, filename_c, salt)
 
         request['attachment'] = json.dumps(cipherfile, ensure_ascii=False).replace(' ','')
         request['attachmentname'] = json.dumps(cipherfilename, ensure_ascii=False).replace(' ','')
 
     if args.debug: print("Request:\t{}".format(request))
+
+    if args.dry: sys.exit(0)
 
     server = pbincli.settings.server
     result = privatebin().post(request)
@@ -135,12 +146,12 @@ def get(args):
 
             if args.debug: print("Name:\t{}\nData:\t{}".format(cipherfilename, cipherfile))
 
-            attachmentf = pbincli.sjcl_simple.decrypt(password, cipherfile)
-            attachmentname = pbincli.sjcl_simple.decrypt(password, cipherfilename)
+            attachmentf_c = pbincli.sjcl_simple.decrypt(password, cipherfile)
+            attachmentname_c = pbincli.sjcl_simple.decrypt(password, cipherfilename)
 
-            attachment = str(attachmentf.split(',', 1)[1:])
+            attachment = str(attachmentf_c.split(',', 1)[1:])
             file = b64decode(attachment)
-            filename = attachmentname
+            filename = attachmentname_c
 
             print("Filename:\t{}\n".format(filename))
 
